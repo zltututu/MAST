@@ -1,4 +1,4 @@
-"""Shared plumbing for the two entry points: model construction, checkpoint transfer, run bookkeeping."""
+"""Shared plumbing for the entry points: model construction, checkpoint transfer, run bookkeeping."""
 
 import os
 
@@ -11,7 +11,7 @@ from .callback.tracking import SaveModelCB
 from .data import get_dls
 from .learner import Learner
 from .masking import MissingTokenCB, PatchCB, TimeFreqSequentialMaskCB
-from .metrics import mae, mse
+from .metrics import accuracy, f1_macro, mae, mse, precision_macro, recall_macro
 from .model import MAST, MASTModel
 
 
@@ -99,7 +99,7 @@ def save_losses(learn, path):
 
 
 def run_pretrain(args):
-    """Self-supervised pretraining on ETTh1. Returns the fitted Learner."""
+    """Self-supervised pretraining on the dataset selected by ``args.data``. Returns the fitted Learner."""
     set_seed(args.seed)
     device = select_device(require_cuda=args.require_cuda)
     print(f'device: {device}')
@@ -133,6 +133,9 @@ def run_pretrain(args):
 
 def run_forecast(args):
     """Downstream forecasting: linear probe or end-to-end finetuning of a pretrained MAST."""
+    if args.data == 'UEA':
+        raise ValueError("--data UEA is a classification dataset; use classify.py for it")
+
     set_seed(args.seed)
     device = select_device(require_cuda=args.require_cuda)
     print(f'device: {device}')
@@ -169,3 +172,57 @@ def run_forecast(args):
         os.path.join(args.save_path, f'{args.save_name}_acc.csv'), float_format='%.6f', index=False
     )
     return learn, (mse_score, mae_score)
+
+
+def run_classification(args):
+    """Downstream classification: linear probe or end-to-end finetuning of a pretrained MAST.
+
+    Follows the protocol of the TSLib classification experiments: the pretrained
+    backbone is combined with a classification head and trained with cross-entropy;
+    the UEA TEST split doubles as the validation set.
+    """
+    if args.data != 'UEA':
+        raise ValueError(f"run_classification needs --data UEA, got {args.data!r}")
+
+    set_seed(args.seed)
+    device = select_device(require_cuda=args.require_cuda)
+    print(f'device: {device}')
+
+    dls = get_dls(args)
+    print(f'train/val/test batches: {len(dls.train)}/{len(dls.valid)}/{len(dls.test)}, '
+          f'variates: {dls.vars}, classes: {dls.num_classes}')
+
+    # the classification head outputs one logit per class
+    args.target_points = dls.num_classes
+
+    model = build_model(dls.vars, args, head_type='classification').to(device)
+    model = load_pretrained_weights(model, args.pretrained_model, exclude_head=True, device=device)
+
+    cbs = [RevInCB(dls.vars, denorm=False)] if args.revin else []   # norm only, no denorm
+    cbs += [PatchCB(patch_len=args.patch_len, stride=args.stride)]
+    if args.handle_missing:
+        cbs += [MissingTokenCB(model.patch_token.data)]
+    cbs += [SaveModelCB(monitor='valid_loss', fname=args.save_name, path=args.save_path)]
+
+    learn = Learner(dls, model, torch.nn.CrossEntropyLoss(), lr=args.lr, cbs=cbs, device=device)
+
+    if args.finetune_mode == 'linear_probe':
+        learn.linear_probe(n_epochs=args.n_epochs, base_lr=args.lr)
+    else:
+        learn.fine_tune(n_epochs=args.n_epochs, base_lr=args.lr, freeze_epochs=args.freeze_epochs)
+
+    save_losses(learn, os.path.join(args.save_path, f'{args.save_name}_losses.csv'))
+
+    weight_path = os.path.join(args.save_path, f'{args.save_name}.pth')
+    _, _, scores = learn.test(dls.test, weight_path=weight_path,
+                              scores=[accuracy, precision_macro, recall_macro, f1_macro])
+    acc, prec, rec, f1 = (float(s) for s in scores)
+
+    print(f'\n[{args.finetune_mode}] test accuracy: {acc:.4f}   precision: {prec:.4f}   '
+          f'recall: {rec:.4f}   F1 (macro): {f1:.4f}')
+    pd.DataFrame({'accuracy': [acc], 'precision': [prec], 'recall': [rec],
+                  'f1_macro': [f1]}).to_csv(
+        os.path.join(args.save_path, f'{args.save_name}_acc.csv'),
+        float_format='%.6f', index=False
+    )
+    return learn, (acc, f1)

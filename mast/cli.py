@@ -6,15 +6,30 @@ checkpoint will not line up with the downstream model; they are therefore define
 
 import os
 
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 def add_common_args(parser):
     """Add the arguments that both stages share."""
     # --- data -------------------------------------------------------------
     data = parser.add_argument_group('data')
+    data.add_argument('--data', type=str, default='ETTh1',
+                      choices=['ETTh1', 'ETTh2', 'ETTm1', 'ETTm2', 'custom', 'UEA'],
+                      help='dataset flag: the four ETT variants use their fixed split; '
+                           'custom = any other TSLib forecasting CSV (weather, electricity, '
+                           'traffic, exchange_rate, national_illness, ...); UEA = the TSLib '
+                           'classification datasets (.ts format)')
+    data.add_argument('--root_path', type=str,
+                      default=os.path.join(_REPO_ROOT, 'dataset', 'ETT-small'),
+                      help='directory holding the dataset file')
+    data.add_argument('--data_path', type=str, default='ETTh1.csv',
+                      help='dataset file name (ignored for --data UEA)')
+    data.add_argument('--target', type=str, default='OT',
+                      help='target variate, used with --features S and by Dataset_Custom')
     data.add_argument('--context_points', type=int, default=336,
-                      help='look-back window length (seq_len)')
+                      help='look-back window length (seq_len); 0 = auto-detect (UEA only)')
     data.add_argument('--target_points', type=int, default=96,
-                      help='forecast horizon (pred_len)')
+                      help='forecast horizon (pred_len); ignored by classify.py')
     data.add_argument('--batch_size', type=int, default=64)
     data.add_argument('--num_workers', type=int, default=0)
     data.add_argument('--features', type=str, default='M', choices=['M', 'S', 'MS'],

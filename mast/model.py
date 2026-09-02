@@ -1,10 +1,11 @@
 """MAST model definition.
 
 The architecture is a PatchTST-style channel-independent Transformer encoder
-(`MASTEncoder`) with two interchangeable heads:
+(`MASTEncoder`) with three interchangeable heads:
 
-* `PretrainHead`   - reconstructs every masked patch, used during self-supervised pretraining.
-* `PredictionHead` - maps the encoded patches to the forecast horizon, used downstream.
+* `PretrainHead`        - reconstructs every masked patch, used during self-supervised pretraining.
+* `PredictionHead`      - maps the encoded patches to the forecast horizon, used downstream.
+* `ClassificationHead`  - maps the last encoded patch to class logits, used by classify.py.
 
 `MASTModel` wraps the encoder and adds the learnable parameters that MAST
 introduces on top of PatchTST:
@@ -24,7 +25,7 @@ from .layers.attention import MultiheadAttention
 from .layers.basics import Transpose, get_activation_fn
 from .layers.pos_encoding import positional_encoding
 
-__all__ = ['MAST', 'MASTModel', 'MASTEncoder', 'PretrainHead', 'PredictionHead']
+__all__ = ['MAST', 'MASTModel', 'MASTEncoder', 'PretrainHead', 'PredictionHead', 'ClassificationHead']
 
 
 class MAST(nn.Module):
@@ -32,11 +33,12 @@ class MAST(nn.Module):
 
     Args:
         c_in: number of input variates.
-        target_dim: forecast horizon (prediction head) - unused by the pretraining head.
+        target_dim: forecast horizon (prediction head) or number of classes
+            (classification head) - unused by the pretraining head.
         patch_len: number of time steps per patch.
         stride: stride between consecutive patches.
         num_patch: number of patches the look-back window is split into.
-        head_type: one of ``pretrain`` or ``prediction``.
+        head_type: one of ``pretrain``, ``prediction`` or ``classification``.
     """
 
     def __init__(self, c_in: int, target_dim: int, patch_len: int, stride: int, num_patch: int,
@@ -48,8 +50,9 @@ class MAST(nn.Module):
 
         super().__init__()
 
-        if head_type not in ('pretrain', 'prediction'):
-            raise ValueError(f"head_type must be 'pretrain' or 'prediction', got {head_type!r}")
+        if head_type not in ('pretrain', 'prediction', 'classification'):
+            raise ValueError(f"head_type must be 'pretrain', 'prediction' or 'classification', "
+                             f"got {head_type!r}")
 
         self.backbone = MASTEncoder(c_in, num_patch=num_patch, patch_len=patch_len,
                                     n_layers=n_layers, d_model=d_model, n_heads=n_heads,
@@ -63,6 +66,8 @@ class MAST(nn.Module):
 
         if head_type == "pretrain":
             self.head = PretrainHead(d_model, patch_len, head_dropout)
+        elif head_type == "classification":
+            self.head = ClassificationHead(self.n_vars, d_model, target_dim, head_dropout)
         else:
             self.head = PredictionHead(individual, self.n_vars, d_model, num_patch, target_dim, head_dropout)
 
@@ -119,6 +124,21 @@ class PredictionHead(nn.Module):
             x = self.flatten(x)                       # [bs x n_vars x (d_model * num_patch)]
             x = self.linear(self.dropout(x))          # [bs x n_vars x forecast_len]
         return x.transpose(2, 1)                      # [bs x forecast_len x n_vars]
+
+
+class ClassificationHead(nn.Module):
+    def __init__(self, n_vars, d_model, n_classes, head_dropout):
+        super().__init__()
+        self.flatten = nn.Flatten(start_dim=1)
+        self.dropout = nn.Dropout(head_dropout)
+        self.linear = nn.Linear(n_vars * d_model, n_classes)
+
+    def forward(self, x):
+        """`x`: [bs x n_vars x d_model x num_patch] -> [bs x n_classes]."""
+        x = x[:, :, :, -1]                # only the last item of the sequence
+        x = self.flatten(x)               # [bs x n_vars * d_model]
+        x = self.dropout(x)
+        return self.linear(x)             # [bs x n_classes]
 
 
 class MASTEncoder(nn.Module):
@@ -262,7 +282,8 @@ class MASTModel(nn.Module):
     """MAST wrapper: `MAST` encoder plus the learnable tokens and missing-state patch dropping.
 
     Forward pass returns ``(z, out)`` for the pretraining head (the latent representation is
-    needed by the self-supervised objective) and just ``out`` for the prediction head.
+    needed by the self-supervised objective) and just ``out`` for the prediction and
+    classification heads.
     """
 
     def __init__(self, encoder: MAST, patch_len: int, device=None,

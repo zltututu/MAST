@@ -142,7 +142,8 @@ class Learner(GetAttr):
 
     def train_step(self, batch):
         self.xb, self.yb = batch
-        if isinstance(self.yb, torch.Tensor) and self.yb.dtype != torch.float32:
+        # classification labels must stay long for CrossEntropyLoss; only narrow float64
+        if isinstance(self.yb, torch.Tensor) and self.yb.dtype == torch.float64:
             self.yb = self.yb.float()
         pred = self.model_forward()
         return pred, self.loss_func(pred, self.yb)
@@ -158,7 +159,7 @@ class Learner(GetAttr):
 
     def valid_step(self, batch):
         self.xb, self.yb = batch
-        if isinstance(self.yb, torch.Tensor) and self.yb.dtype != torch.float32:
+        if isinstance(self.yb, torch.Tensor) and self.yb.dtype == torch.float64:
             self.yb = self.yb.float()
         pred = self.model_forward()
         return pred, self.loss_func(pred, self.yb)
