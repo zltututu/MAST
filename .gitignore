@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Training artefacts (dataset/ETT-small/ETTh1.csv is committed on purpose)
+saved_models/
+checkpoints/
+results/
+logs/
+runs/
+*.log

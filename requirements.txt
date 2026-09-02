@@ -1,0 +1,7 @@
+# MAST is a small pure-PyTorch codebase; the versions below are the ones used to
+# produce the reference results in README.md.
+python>=3.9
+torch>=2.0
+numpy>=1.23
+pandas>=1.5
+scikit-learn>=1.1
