@@ -212,10 +212,7 @@ python forecast.py \
   --save_dir saved_models --save_name mast_finetune_etth1
 ```
 
-Both stage-2 commands print the test scores and write `saved_models/<save_name>_acc.csv`:
-
-The reported scores always come from the checkpoint with the best validation loss, not
-from the last epoch.
+Both stage-2 commands print the test scores and write `saved_models/<save_name>_acc.csv`.The reported scores always come from the checkpoint with the best validation loss, not from the last epoch.
 
 ### 3. Forecasting on any other TSLib dataset
 
