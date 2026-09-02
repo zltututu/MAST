@@ -214,11 +214,6 @@ python forecast.py \
 
 Both stage-2 commands print the test scores and write `saved_models/<save_name>_acc.csv`:
 
-```text
-[linear_probe] test MSE: 0.391311   MAE: 0.409339   RMSE: 0.625549
-[finetune]     test MSE: 0.384749   MAE: 0.405192   RMSE: 0.620281
-```
-
 The reported scores always come from the checkpoint with the best validation loss, not
 from the last epoch.
 
